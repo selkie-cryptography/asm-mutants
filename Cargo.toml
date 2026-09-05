@@ -1,0 +1,31 @@
+[package]
+name = "cargo-asm-mutants"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+authors = ["Deirdre Connolly <durumcrustulum@gmail.com>"]
+description = "Mutation testing for inline assembly: the asm! gap in cargo-mutants."
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/selkie-cryptography/asm-mutants"
+homepage = "https://selkiecryptography.com"
+documentation = "https://github.com/selkie-cryptography/asm-mutants#readme"
+keywords = ["mutation-testing", "assembly", "testing", "cargo", "cryptography"]
+categories = ["development-tools::testing", "development-tools::cargo-plugins"]
+# CI config and the integration-test fixtures are not needed to build or
+# run the tool.
+exclude = [".github", "testdata"]
+
+[[bin]]
+name = "cargo-asm-mutants"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+globset = "0.4"
+ignore = "0.4"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+toml = "0.9"

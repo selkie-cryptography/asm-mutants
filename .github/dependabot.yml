@@ -1,0 +1,19 @@
+# SHA-pinned actions go stale without automation; bumps arrive as PRs
+# showing the new SHA next to the version comment.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  # Compatible (minor/patch) crate bumps arrive grouped in one weekly PR.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      cargo-compatible:
+        update-types:
+          - "minor"
+          - "patch"

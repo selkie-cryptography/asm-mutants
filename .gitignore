@@ -1,0 +1,4 @@
+/target
+/asm-mutants.out
+/asm-mutants.out.old
+/testdata/*/target
