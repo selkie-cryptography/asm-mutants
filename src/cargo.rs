@@ -16,6 +16,12 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::ValueEnum;
+#[cfg(unix)]
+use nix::{
+    errno::Errno,
+    sys::signal::{Signal, killpg},
+    unistd::Pid,
+};
 use serde::Deserialize;
 
 use crate::outcome::{Phase, PhaseResult, ProcessStatus};
@@ -164,11 +170,17 @@ impl Invocation {
 
     /// Kills the whole process group, so a spinning test binary dies with
     /// its cargo parent.
+    ///
+    /// Direct `killpg`, not `/bin/kill -9 -<pid>`: procps parses a
+    /// `-1xxx` argument as pid -1 and kills every process on the host.
+    /// The group is gone already if cargo exited since the last poll.
     #[cfg(unix)]
     fn kill(child: &mut Child) -> Result<()> {
-        Command::new("kill")
-            .args(["-9", &format!("-{}", child.id())])
-            .status()?;
+        let pid = i32::try_from(child.id()).context("pid exceeds i32")?;
+        match killpg(Pid::from_raw(pid), Signal::SIGKILL) {
+            Ok(()) | Err(Errno::ESRCH) => {}
+            Err(e) => return Err(e).with_context(|| format!("kill process group {pid}")),
+        }
         child.wait()?;
         Ok(())
     }

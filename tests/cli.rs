@@ -4,7 +4,9 @@
 use std::{
     fs,
     path::Path,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
+    thread,
+    time::{Duration, Instant},
 };
 
 fn fixture() -> tempfile::TempDir {
@@ -245,6 +247,63 @@ fn baseline_failures_return_four_and_preserve_the_report() {
         assert!(!outcomes["end_time"].as_str().unwrap().is_empty());
         assert!(report.join("log/baseline.log").exists());
     }
+}
+
+/// A hung baseline test ends as a timeout, with the tool returning
+/// promptly. Guards the process-group kill: a no-op kill leaves the tool
+/// waiting on the hung test forever, and a kill that reaches outside the
+/// group takes this test runner down with it.
+#[test]
+fn hung_tests_time_out_and_the_tool_returns() {
+    let fixture = fixture();
+    let lib = fixture.path().join("src/lib.rs");
+    let original = fs::read_to_string(&lib).unwrap();
+    fs::write(
+        &lib,
+        format!("{original}\n#[test]\nfn hang() {{ loop {{ std::thread::sleep(std::time::Duration::from_secs(1)); }} }}\n"),
+    )
+    .unwrap();
+    let out = tempfile::tempdir().unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_cargo-asm-mutants"))
+        .arg("-d")
+        .arg(fixture.path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .args([
+            "--timeout",
+            "2",
+            "--no-times",
+            "-o",
+            out.path().to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            child.kill().unwrap();
+            panic!("cargo-asm-mutants did not return after the test timeout");
+        }
+        thread::sleep(Duration::from_millis(200));
+    };
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // A baseline timeout is a baseline failure: exit 4, nothing else run.
+    assert_eq!(status.code(), Some(4), "{}\n{stderr}", stdout(&output));
+    assert!(stderr.contains("baseline failed; see"), "{stderr}");
+    let outcomes: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(out.path().join("asm-mutants.out/outcomes.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(outcomes["outcomes"].as_array().unwrap().len(), 1);
+    assert_eq!(outcomes["outcomes"][0]["scenario"], "Baseline");
+    assert_eq!(outcomes["outcomes"][0]["summary"], "Timeout");
 }
 
 /// Builds and tests the fixture, so only where its `asm!` compiles.
