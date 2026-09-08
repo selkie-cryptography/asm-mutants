@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 use crate::{
     arch::Aarch64,
@@ -215,10 +215,11 @@ impl Lab {
                 if lab.exit_code() == ExitCode::BaselineFailed {
                     lab.finish();
                     output.write_outcomes(&lab)?;
-                    bail!(
-                        "baseline failed; see {}",
+                    eprintln!(
+                        "error: baseline failed; see {}",
                         output.path().join("log/baseline.log").display()
                     );
+                    return Ok(ExitCode::BaselineFailed);
                 }
                 timeouts
             }

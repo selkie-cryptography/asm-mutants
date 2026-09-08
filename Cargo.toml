@@ -9,11 +9,18 @@ license = "Apache-2.0 OR MIT"
 repository = "https://github.com/selkie-cryptography/asm-mutants"
 homepage = "https://selkiecryptography.com"
 documentation = "https://github.com/selkie-cryptography/asm-mutants#readme"
+readme = "README.md"
 keywords = ["mutation-testing", "assembly", "testing", "cargo", "cryptography"]
 categories = ["development-tools::testing", "development-tools::cargo-plugins"]
-# CI config and the integration-test fixtures are not needed to build or
-# run the tool.
-exclude = [".github", "testdata"]
+# Cargo adds the manifest and lockfile automatically.
+include = [
+    "/src/**",
+    "/tests/**",
+    "/testdata/carry/Cargo.toml.in",
+    "/testdata/carry/src/**",
+    "/README.md",
+    "/LICENSE-*",
+]
 
 [[bin]]
 name = "cargo-asm-mutants"

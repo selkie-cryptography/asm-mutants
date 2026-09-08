@@ -275,7 +275,13 @@ impl Cli {
         if args.get(1).is_some_and(|arg| arg == "asm-mutants") {
             args.remove(1);
         }
-        Self::parse_from(args)
+        Self::try_parse_from(args).unwrap_or_else(|error| {
+            // Clap defaults to exit code 2 for usage errors; that code means
+            // missed mutants here. Help and version requests still succeed.
+            let code = if error.use_stderr() { 1 } else { 0 };
+            let _ = error.print();
+            std::process::exit(code)
+        })
     }
 }
 

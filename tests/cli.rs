@@ -3,18 +3,41 @@
 
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Output},
 };
 
-fn fixture() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/carry")
+fn fixture() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir(dir.path().join("src")).unwrap();
+    for (path, contents) in [
+        (
+            "Cargo.toml",
+            include_str!("../testdata/carry/Cargo.toml.in"),
+        ),
+        ("src/lib.rs", include_str!("../testdata/carry/src/lib.rs")),
+        (
+            "src/select.s",
+            include_str!("../testdata/carry/src/select.s"),
+        ),
+    ] {
+        fs::write(dir.path().join(path), contents).unwrap();
+    }
+    dir
 }
 
 fn run(args: &[&str]) -> Output {
+    let fixture = fixture();
+    run_in(fixture.path(), args)
+}
+
+fn run_in(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_cargo-asm-mutants"))
         .arg("-d")
-        .arg(fixture())
+        .arg(dir)
+        // The fixture has no dependencies. Keep nested Cargo invocations
+        // independent of registry availability.
+        .env("CARGO_NET_OFFLINE", "true")
         .args(args)
         .output()
         .expect("run cargo-asm-mutants")
@@ -22,6 +45,37 @@ fn run(args: &[&str]) -> Output {
 
 fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+fn help_version_and_usage_errors_have_distinct_exit_codes() {
+    let empty = tempfile::tempdir().unwrap();
+    for prefix in [vec![], vec!["asm-mutants"]] {
+        for option in ["--help", "--version", "--unknown-option"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_cargo-asm-mutants"))
+                .current_dir(empty.path())
+                .args(&prefix)
+                .arg(option)
+                .output()
+                .unwrap();
+            match option {
+                "--help" => {
+                    assert!(output.status.success());
+                    assert!(stdout(&output).contains("cargo asm-mutants"));
+                }
+                "--version" => {
+                    assert!(output.status.success());
+                    assert!(stdout(&output).contains(env!("CARGO_PKG_VERSION")));
+                }
+                _ => {
+                    assert_eq!(output.status.code(), Some(1));
+                    assert!(
+                        String::from_utf8_lossy(&output.stderr).contains("unexpected argument")
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Every mutant of the fixture, in source order: the included `.s` first,
@@ -150,6 +204,47 @@ fn json_and_diff_listings() {
         with_diff.contains("-    csel x0, x0, x1, lo\n+    mov x0, x0\n"),
         "{with_diff}"
     );
+}
+
+#[test]
+fn baseline_failures_return_four_and_preserve_the_report() {
+    for source in [
+        "compile_error!(\"baseline build failure\");\n",
+        "#[test]\nfn baseline_failure() { panic!(\"baseline test failure\"); }\n",
+    ] {
+        let fixture = fixture();
+        let lib = fixture.path().join("src/lib.rs");
+        let original = fs::read_to_string(&lib).unwrap();
+        fs::write(&lib, format!("{original}\n{source}")).unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let output = run_in(
+            fixture.path(),
+            &[
+                "--operators",
+                "carry",
+                "--no-times",
+                "-o",
+                out.path().to_str().unwrap(),
+            ],
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(4),
+            "{}\n{stderr}",
+            stdout(&output)
+        );
+        assert!(stderr.contains("baseline failed; see"), "{stderr}");
+        let report = out.path().join("asm-mutants.out");
+        let outcomes: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(report.join("outcomes.json")).unwrap())
+                .unwrap();
+        assert_eq!(outcomes["total_mutants"], 2);
+        assert_eq!(outcomes["outcomes"].as_array().unwrap().len(), 1);
+        assert_eq!(outcomes["outcomes"][0]["scenario"], "Baseline");
+        assert!(!outcomes["end_time"].as_str().unwrap().is_empty());
+        assert!(report.join("log/baseline.log").exists());
+    }
 }
 
 /// Builds and tests the fixture, so only where its `asm!` compiles.

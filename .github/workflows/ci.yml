@@ -42,17 +42,17 @@ jobs:
         with:
           toolchain: stable
           components: clippy
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --locked --all-targets -- -D warnings
 
-  # The run test builds the aarch64 fixture, so it only runs on the
-  # Apple Silicon runner; x86_64 covers listing, filtering, and parsing.
+  # Native ARM64 runners execute the assembly fixture on both supported
+  # operating systems; x86_64 also covers listing, filtering, and parsing.
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -60,10 +60,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - run: cargo test
+      - run: cargo test --locked --all-targets
 
   msrv:
-    name: MSRV build
+    name: MSRV tests (1.89)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -72,7 +72,32 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: "1.89"
-      - run: cargo build
+      - run: cargo test --locked --all-targets
+
+  package:
+    name: Package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
+        with:
+          toolchain: stable
+      - name: Check publication without uploading
+        run: cargo publish --dry-run --locked
+      - name: Test and install the packaged source
+        shell: bash
+        run: |
+          package_dir=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json, sys; p = next(p for p in json.load(sys.stdin)["packages"] if p["name"] == "cargo-asm-mutants"); print("target/package/" + p["name"] + "-" + p["version"])')
+          cargo test --locked --all-targets --manifest-path "$package_dir/Cargo.toml"
+          cargo install --locked --path "$package_dir" --root target/package-install
+          target/package-install/bin/cargo-asm-mutants --version
+          target/package-install/bin/cargo-asm-mutants asm-mutants --help
 
   deny:
     name: cargo deny
@@ -87,4 +112,4 @@ jobs:
       - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
         with:
           tool: cargo-deny
-      - run: cargo deny check
+      - run: cargo deny --locked check
